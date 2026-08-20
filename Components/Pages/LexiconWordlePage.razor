@@ -1,0 +1,419 @@
+﻿@page "/lexicon-wordle"
+@using LexiconWASMWordleApp.Enums
+@inject IGameService Game
+@inject IStatsService Stats
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>LEXICON — Word Challenge</PageTitle>
+
+<div class="lexicon-app @(showStats ? "blur-bg" : "")">
+
+    <!-- Header -->
+    <header class="lex-header">
+        <button class="icon-btn" @onclick="ToggleHelp" title="How to play">
+            <span class="icon">?</span>
+
+        </button>
+        <div class="lex-logo">
+            <span class="logo-lex">LEX</span><span class="logo-icon">◈</span><span class="logo-con">CON</span>
+        </div>
+        <div class="header-right">
+            <button class="icon-btn mode-btn @(Game.State.Mode == GameMode.Daily ? "active-mode" : "")"
+                    @onclick="() => StartGame(GameMode.Daily)" title="Daily Challenge">
+                <span class="icon">◉</span>
+            </button>
+            <button class="icon-btn mode-btn @(Game.State.Mode == GameMode.Freeplay ? "active-mode" : "")"
+                    @onclick="() => StartGame(GameMode.Freeplay)" title="Free Play">
+                <span class="icon">∞</span>
+            </button>
+            <button class="icon-btn" @onclick="ToggleStats" title="Statistics">
+                <span class="icon">▦</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Mode Badge -->
+    <div class="mode-badge">
+        @if (Game.State.Mode == GameMode.Daily)
+        {
+            <span class="badge daily">◉ DAILY CHALLENGE</span>
+        }
+        else
+        {
+            <span class="badge free">∞ FREE PLAY</span>
+        }
+    </div>
+
+    <!-- Toast Message -->
+    @if (!string.IsNullOrEmpty(toastMessage))
+    {
+        <div class="toast @(toastVisible ? "toast-in" : "toast-out")">@toastMessage</div>
+    }
+
+    <!-- Board -->
+    <div class="lex-board" id="game-board">
+        @if (Game.Board.Count > 0)
+        {
+            @for (int row = 0; row < 6; row++)
+            {
+                var r = row;
+                var isCurrentRow = r == Game.State.Guesses.Count && !Game.State.IsGameOver;
+                <div class="board-row @(shakingRow == r ? "shake" : "") @(bouncingRow == r ? "bounce-row" : "")">
+                    @for (int col = 0; col < 5; col++)
+                    {
+                        var c = col;
+                        var tile = Game.Board[r][c];
+                        var delay = $"animation-delay: {c * 0.1}s";
+                        <div class="tile @GetTileClass(tile) @(revealingRow == r ? "reveal-" + c : "")"
+                             style="@(revealingRow == r ? delay : "")">
+                            <div class="tile-inner">
+                                <div class="tile-front">@(tile.Letter == ' ' ? "" : tile.Letter.ToString())</div>
+                                <div class="tile-back @GetTileBackClass(tile)">@(tile.Letter == ' ' ? "" : tile.Letter.ToString())</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        }
+    </div>
+
+    <!-- Game Over Banner -->
+    @if (Game.State.IsGameOver && showEndBanner)
+    {
+        <div class="end-banner @(Game.State.IsWon ? "win-banner" : "lose-banner")">
+            @if (Game.State.IsWon)
+            {
+                <div class="end-msg">@Game.State.Message</div>
+                <div class="end-sub">Solved in @Game.State.Guesses.Count @(Game.State.Guesses.Count == 1 ? "guess" : "guesses")</div>
+            }
+            else
+            {
+                <div class="end-msg">THE WORD WAS</div>
+                <div class="answer-reveal">@Game.State.Message</div>
+            }
+            <div class="end-actions">
+                <button class="btn-action" @onclick="ToggleStats">VIEW STATS</button>
+                @if (Game.State.Mode == GameMode.Freeplay)
+                {
+                    <button class="btn-action btn-new" @onclick="() => StartGame(GameMode.Freeplay)">NEW WORD</button>
+                }
+            </div>
+        </div>
+    }
+
+    <!-- Keyboard -->
+    <div class="lex-keyboard">
+        @foreach (var row in KeyboardRows)
+        {
+            <div class="key-row">
+                @foreach (var key in row)
+                {
+                    if (key == "ENTER")
+                    {
+                        <button class="key key-wide key-enter" @onclick="HandleEnter">ENTER</button>
+                    }
+                    else if (key == "⌫")
+                    {
+                        <button class="key key-wide key-back" @onclick="HandleBackspace">⌫</button>
+                    }
+                    else
+                    {
+                        var k = key[0];
+                        var status = Game.KeyboardStatus.ContainsKey(k) ? Game.KeyboardStatus[k] : TileStatus.Empty;
+                        <button class="key @GetKeyClass(status)" @onclick="() => HandleKey(k)">@key</button>
+                    }
+                }
+            </div>
+        }
+    </div>
+</div>
+
+<!-- Stats Modal -->
+@if (showStats)
+{
+    <div class="modal-overlay" @onclick="ToggleStats">
+        <div class="stats-modal" @onclick:stopPropagation="true">
+            <button class="modal-close" @onclick="ToggleStats">✕</button>
+            <h2 class="modal-title">STATISTICS</h2>
+
+            <div class="stat-grid">
+                <div class="stat-box">
+                    <div class="stat-num">@currentStats.GamesPlayed</div>
+                    <div class="stat-label">Played</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-num">@currentStats.WinPercentage%</div>
+                    <div class="stat-label">Win %</div>
+                </div>
+                <div class="stat-box streak-box">
+                    <div class="stat-num">@currentStats.CurrentStreak</div>
+                    <div class="stat-label">Current Streak</div>
+                </div>
+                <div class="stat-box streak-box">
+                    <div class="stat-num">@currentStats.MaxStreak</div>
+                    <div class="stat-label">Max Streak</div>
+                </div>
+            </div>
+
+            <h3 class="dist-title">GUESS DISTRIBUTION</h3>
+            <div class="guess-dist">
+                @foreach (var pair in currentStats.GuessDistribution.OrderBy(p => p.Key))
+                {
+                    var maxVal = currentStats.GuessDistribution.Values.Max();
+                    var width = maxVal == 0 ? 8 : Math.Max(8, (int)((double)pair.Value / maxVal * 100));
+                    var isLast = Game.State.IsGameOver && Game.State.IsWon && Game.State.Guesses.Count == pair.Key;
+                    <div class="dist-row">
+                        <span class="dist-num">@pair.Key</span>
+                        <div class="dist-bar-wrap">
+                            <div class="dist-bar @(isLast ? "dist-bar-active" : "")" style="width: @width%">
+                                @pair.Value
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <button class="btn-reset" @onclick="ResetStats">RESET STATS</button>
+        </div>
+    </div>
+}
+
+<!-- Help Modal -->
+@if (showHelp)
+{
+    <div class="modal-overlay" @onclick="ToggleHelp">
+        <div class="help-modal" @onclick:stopPropagation="true">
+            <button class="modal-close" @onclick="ToggleHelp">✕</button>
+            <h2 class="modal-title">HOW TO PLAY</h2>
+            <p class="help-text">Guess the <strong>LEXICON</strong> word in 6 tries.</p>
+            <ul class="help-list">
+                <li>Each guess must be a valid 5-letter word.</li>
+                <li>Hit <strong>ENTER</strong> to submit your guess.</li>
+                <li>Tiles change color after each guess to show how close you are.</li>
+            </ul>
+            <div class="help-examples">
+                <div class="help-example">
+                    <div class="ex-tiles">
+                        <div class="ex-tile correct">W</div>
+                        <div class="ex-tile empty">E</div>
+                        <div class="ex-tile empty">A</div>
+                        <div class="ex-tile empty">R</div>
+                        <div class="ex-tile empty">Y</div>
+                    </div>
+                    <p><strong>W</strong> is in the word and in the correct spot.</p>
+                </div>
+                <div class="help-example">
+                    <div class="ex-tiles">
+                        <div class="ex-tile empty">P</div>
+                        <div class="ex-tile present">I</div>
+                        <div class="ex-tile empty">L</div>
+                        <div class="ex-tile empty">L</div>
+                        <div class="ex-tile empty">S</div>
+                    </div>
+                    <p><strong>I</strong> is in the word but in the wrong spot.</p>
+                </div>
+                <div class="help-example">
+                    <div class="ex-tiles">
+                        <div class="ex-tile empty">V</div>
+                        <div class="ex-tile empty">A</div>
+                        <div class="ex-tile empty">G</div>
+                        <div class="ex-tile absent">U</div>
+                        <div class="ex-tile empty">E</div>
+                    </div>
+                    <p><strong>U</strong> is not in the word at all.</p>
+                </div>
+            </div>
+            <div class="help-modes">
+                <div class="mode-info">
+                    <span class="mode-icon">◉</span>
+                    <span><strong>Daily Challenge</strong> — One new word per day. Compete with everyone!</span>
+                </div>
+                <div class="mode-info">
+                    <span class="mode-icon">∞</span>
+                    <span><strong>Free Play</strong> — Unlimited games with random words.</span>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool showStats = false;
+    private bool showHelp = false;
+    private bool showEndBanner = false;
+    private GameStats currentStats = new();
+    private string toastMessage = "";
+    private bool toastVisible = false;
+    private int revealingRow = -1;
+    private int shakingRow = -1;
+    private int bouncingRow = -1;
+    private System.Threading.Timer? toastTimer;
+
+    private readonly string[][] KeyboardRows = new[]
+    {
+        new[] { "Q","W","E","R","T","Y","U","I","O","P" },
+        new[] { "A","S","D","F","G","H","J","K","L" },
+        new[] { "ENTER","Z","X","C","V","B","N","M","⌫" }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Game.OnStateChanged += StateHasChanged;
+        Game.StartNewGame(GameMode.Daily);
+        currentStats = await Stats.LoadStatsAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("lexicon.init", DotNetObjectReference.Create(this));
+        }
+    }
+
+    [JSInvokable]
+    public async Task HandleKeyPress(string key)
+    {
+        if (key == "Enter") await HandleEnterAsync();
+        else if (key == "Backspace") HandleBackspace();
+        else if (key.Length == 1 && char.IsLetter(key[0]))
+        {
+            Game.AddLetter(key[0]);
+        }
+    }
+
+    private void HandleKey(char c) => Game.AddLetter(c);
+
+    private void HandleBackspace() => Game.RemoveLetter();
+
+    private async Task HandleEnter() => await HandleEnterAsync();
+
+    private async Task HandleEnterAsync()
+    {
+        var rowIdx = Game.State.Guesses.Count;
+        var (success, message) = Game.SubmitGuess();
+
+        if (!success)
+        {
+            if (message == "Not enough letters" || message == "Not in word list")
+            {
+                shakingRow = rowIdx;
+                StateHasChanged();
+                await Task.Delay(600);
+                shakingRow = -1;
+                StateHasChanged();
+                await ShowToastAsync(message);
+            }
+            return;
+        }
+
+        // Trigger reveal animation
+        revealingRow = rowIdx;
+        StateHasChanged();
+        await Task.Delay(600);
+        revealingRow = -1;
+
+        if (Game.State.IsGameOver)
+        {
+            await Stats.RecordGameAsync(Game.State.IsWon, Game.State.Guesses.Count);
+            currentStats = await Stats.LoadStatsAsync();
+
+            if (Game.State.IsWon)
+            {
+                bouncingRow = rowIdx;
+                StateHasChanged();
+                await Task.Delay(1000);
+                bouncingRow = -1;
+            }
+
+            await Task.Delay(500);
+            showEndBanner = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task StartGame(GameMode mode)
+    {
+        showEndBanner = false;
+        Game.StartNewGame(mode);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ShowToastAsync(string msg)
+    {
+        toastMessage = msg;
+        toastVisible = true;
+        StateHasChanged();
+        await Task.Delay(1800);
+        toastVisible = false;
+        StateHasChanged();
+        await Task.Delay(400);
+        toastMessage = "";
+        StateHasChanged();
+    }
+
+    private async Task ToggleStats()
+    {
+        showStats = !showStats;
+        if (showStats)
+        {
+            currentStats = await Stats.LoadStatsAsync();
+        }
+        StateHasChanged();
+    }
+
+    private void ToggleHelp() { showHelp = !showHelp; StateHasChanged(); }
+
+    private async Task ResetStats()
+    {
+        await Stats.ResetStatsAsync();
+        currentStats = new GameStats();
+        StateHasChanged();
+    }
+
+    private string GetTileClass(TileState tile)
+    {
+        return tile.Status switch
+        {
+            TileStatus.Empty => "tile-empty",
+            TileStatus.Filled => "tile-filled",
+            _ => "tile-revealed"
+        };
+    }
+
+    private string GetTileBackClass(TileState tile)
+    {
+        return tile.Status switch
+        {
+            TileStatus.Correct => "back-correct",
+            TileStatus.Present => "back-present",
+            TileStatus.Absent => "back-absent",
+            _ => ""
+        };
+    }
+
+    private string GetKeyClass(TileStatus status)
+    {
+        return status switch
+        {
+            TileStatus.Correct => "key-correct",
+            TileStatus.Present => "key-present",
+            TileStatus.Absent => "key-absent",
+            _ => "key-default"
+        };
+    }
+
+    public void Dispose()
+    {
+        Game.OnStateChanged -= StateHasChanged;
+        toastTimer?.Dispose();
+
+        // Clean up JavaScript interop
+        try
+        {
+            JS.InvokeVoidAsync("lexicon.dispose");
+        }
+        catch { /* Ignore errors during disposal */ }
+    }
+}

@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.11.35312.102
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{54EAA3E6-4ACC-4751-92BE-F845E2F52C9F}") = "LexiconWASMWordleApp", "LexiconWASMWordleApp.csproj", "{1EAAA533-CC13-4C7D-83B2-172766A3D912}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1EAAA533-CC13-4C7D-83B2-172766A3D912}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1EAAA533-CC13-4C7D-83B2-172766A3D912}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1EAAA533-CC13-4C7D-83B2-172766A3D912}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1EAAA533-CC13-4C7D-83B2-172766A3D912}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {008BCC81-50EB-42A3-8FF3-C1CF641B16D6}
+	EndGlobalSection
+EndGlobal
