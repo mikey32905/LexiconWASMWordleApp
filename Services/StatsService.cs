@@ -1,4 +1,5 @@
-﻿using LexiconWASMWordleApp.Models;
+﻿using LexiconWASMWordleApp.Enums;
+using LexiconWASMWordleApp.Models;
 using Microsoft.JSInterop;
 using System.Text.Json;
 
@@ -9,6 +10,7 @@ namespace LexiconWASMWordleApp.Services
         private readonly IJSRuntime _js;
         private const string StatsKey = "lexicon_stats";
         private const string DailyKey = "lexicon_daily_played";
+        private const string DailyBoardKey = "lexicon_daily_board_state";
 
         public StatsService(IJSRuntime js)
         {
@@ -40,24 +42,70 @@ namespace LexiconWASMWordleApp.Services
             catch { }
         }
 
-        public async Task RecordGameAsync(bool won, int guessCount)
+        public async Task RecordGameAsync(bool won, int guessCount, GameMode mode = GameMode.Daily, bool isHardMode = false)
         {
             var stats = await LoadStatsAsync();
-            stats.GamesPlayed++;
-            if (won)
-            {
-                stats.GamesWon++;
-                stats.CurrentStreak++;
-                if (stats.CurrentStreak > stats.MaxStreak)
-                    stats.MaxStreak = stats.CurrentStreak;
+            var today = DateTime.UtcNow.Date.ToString("yyyy-MM-dd");
 
-                if (stats.GuessDistribution.ContainsKey(guessCount))
-                    stats.GuessDistribution[guessCount]++;
-            }
-            else
+            stats.GamesPlayed++;
+
+            if (mode == GameMode.Daily)
             {
-                stats.CurrentStreak = 0;
+                await MarkDailyPlayedAsync();
+
+                // Calculate streak continuity
+                if (won)
+                {
+                    stats.GamesWon++;
+
+                    if (isHardMode) stats.HardModeWins++;
+
+                    // Coin reward: more coins for faster solves
+                    int coinsEarned = (7 - guessCount) * 15 + (isHardMode ? 25 : 0);
+                    stats.LexCoins += Math.Max(coinsEarned, 10);
+
+                    // Check if yesterday was played
+                    if (DateTime.TryParse(stats.LastDailyWonDate, out var lastWonDate))
+                    {
+                        var diff = (DateTime.UtcNow.Date - lastWonDate.Date).TotalDays;
+                        if (diff == 1)
+                        {
+                            stats.CurrentStreak++;
+                        }
+                        else if (diff > 1)
+                        {
+                            stats.CurrentStreak = 1; // Skipped a day
+                        }
+                    }
+                    else
+                    {
+                        stats.CurrentStreak = 1; // First daily win
+                    }
+
+                    stats.LastDailyWonDate = today;
+                    stats.MaxStreak = Math.Max(stats.CurrentStreak, stats.MaxStreak);
+
+                    if (stats.GuessDistribution.ContainsKey(guessCount))
+                        stats.GuessDistribution[guessCount]++;
+                }
+                else
+                {
+                    stats.CurrentStreak = 0;
+                }
+
+                stats.LastDailyPlayedDate = today;
             }
+            else // Freeplay Mode
+            {
+                if (won)
+                {
+                    stats.GamesWon++;
+                    stats.LexCoins += 5; // Small casual reward
+                    if (stats.GuessDistribution.ContainsKey(guessCount))
+                        stats.GuessDistribution[guessCount]++;
+                }
+            }
+
             await SaveStatsAsync(stats);
         }
 
@@ -66,7 +114,7 @@ namespace LexiconWASMWordleApp.Services
             try
             {
                 var val = await _js.InvokeAsync<string?>("localStorage.getItem", DailyKey);
-                return val == DateTime.Today.ToString("yyyy-MM-dd");
+                return val == DateTime.UtcNow.Date.ToString("yyyy-MM-dd");
             }
             catch { }
             return false;
@@ -76,7 +124,7 @@ namespace LexiconWASMWordleApp.Services
         {
             try
             {
-                await _js.InvokeVoidAsync("localStorage.setItem", DailyKey, DateTime.Today.ToString("yyyy-MM-dd"));
+                await _js.InvokeVoidAsync("localStorage.setItem", DailyKey, DateTime.UtcNow.Date.ToString("yyyy-MM-dd"));
             }
             catch { }
         }
@@ -84,6 +132,17 @@ namespace LexiconWASMWordleApp.Services
         public async Task ResetStatsAsync()
         {
             await SaveStatsAsync(new GameStats());
+            try
+            {
+                await _js.InvokeVoidAsync("localStorage.removeItem", DailyKey);
+                await _js.InvokeVoidAsync("localStorage.removeItem", DailyBoardKey);
+            }
+            catch { }
         }
+
+        //public Task RecordGameAsync(bool won, int guessCount)
+        //{
+        //    throw new NotImplementedException();
+        //}
     }
 }

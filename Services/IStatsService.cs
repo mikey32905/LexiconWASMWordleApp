@@ -1,4 +1,5 @@
-﻿using LexiconWASMWordleApp.Models;
+﻿using LexiconWASMWordleApp.Enums;
+using LexiconWASMWordleApp.Models;
 
 namespace LexiconWASMWordleApp.Services
 {
@@ -7,7 +8,7 @@ namespace LexiconWASMWordleApp.Services
         Task<bool> HasPlayedTodayAsync();
         Task<GameStats> LoadStatsAsync();
         Task MarkDailyPlayedAsync();
-        Task RecordGameAsync(bool won, int guessCount);
+        Task RecordGameAsync(bool won, int guessCount, GameMode mode = GameMode.Daily, bool isHardMode = false);
         Task ResetStatsAsync();
         Task SaveStatsAsync(GameStats stats);
     }

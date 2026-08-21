@@ -8,22 +8,13 @@ namespace LexiconWASMWordleApp.Services
         public GameState State { get; private set; } = new();
         public List<List<TileState>> Board { get; private set; } = new();
         public Dictionary<char, TileStatus> KeyboardStatus { get; private set; } = new();
+        public bool HardModeEnabled { get; set; } = false;
 
         public event Action? OnStateChanged;
 
         public GameService()
         {
-            // Initialize the board with empty tiles to prevent null reference errors
-            Board = Enumerable.Range(0, 6)
-                .Select(_ => Enumerable.Range(0, 5)
-                    .Select(_ => new TileState())
-                    .ToList())
-                .ToList();
-
-            // Initialize keyboard status
-            KeyboardStatus = new Dictionary<char, TileStatus>();
-            for (char c = 'A'; c <= 'Z'; c++)
-                KeyboardStatus[c] = TileStatus.Empty;
+            ResetBoard();
         }
 
         public void StartNewGame(GameMode mode = GameMode.Daily)
@@ -34,23 +25,13 @@ namespace LexiconWASMWordleApp.Services
                 Mode = mode
             };
 
-            Board = Enumerable.Range(0, 6)
-                .Select(_ => Enumerable.Range(0, 5)
-                    .Select(_ => new TileState())
-                    .ToList())
-                .ToList();
-
-            KeyboardStatus = new Dictionary<char, TileStatus>();
-            for (char c = 'A'; c <= 'Z'; c++)
-                KeyboardStatus[c] = TileStatus.Empty;
-
+            ResetBoard();
             NotifyStateChanged();
         }
 
         public bool AddLetter(char letter)
         {
-            if (State.IsGameOver) return false;
-            if (State.CurrentGuess.Length >= 5) return false;
+            if (State.IsGameOver || State.CurrentGuess.Length >= 5) return false;
 
             State.CurrentGuess += char.ToUpper(letter);
             UpdateCurrentRowTiles();
@@ -60,8 +41,7 @@ namespace LexiconWASMWordleApp.Services
 
         public bool RemoveLetter()
         {
-            if (State.IsGameOver) return false;
-            if (State.CurrentGuess.Length == 0) return false;
+            if (State.IsGameOver || State.CurrentGuess.Length == 0) return false;
 
             State.CurrentGuess = State.CurrentGuess[..^1];
             UpdateCurrentRowTiles();
@@ -75,11 +55,17 @@ namespace LexiconWASMWordleApp.Services
             if (State.CurrentGuess.Length < 5) return (false, "Not enough letters");
             if (!WordList.IsValidGuess(State.CurrentGuess)) return (false, "Not in word list");
 
+            // Hard Mode checks
+            if (HardModeEnabled && State.Guesses.Count > 0)
+            {
+                var (isValidHardMode, hardModeError) = ValidateHardMode(State.CurrentGuess);
+                if (!isValidHardMode) return (false, hardModeError);
+            }
+
             var guess = State.CurrentGuess;
             State.Guesses.Add(guess);
             State.CurrentGuess = "";
 
-            // Evaluate the guess
             var result = EvaluateGuess(guess, State.TargetWord);
             var rowIdx = State.Guesses.Count - 1;
 
@@ -87,23 +73,30 @@ namespace LexiconWASMWordleApp.Services
             {
                 Board[rowIdx][i].Letter = guess[i];
                 Board[rowIdx][i].Status = result[i];
-                Board[rowIdx][i].IsRevealing = true;
             }
 
-            // Update keyboard
+            // Update Keyboard Status
             for (int i = 0; i < 5; i++)
             {
                 var ch = guess[i];
-                var existing = KeyboardStatus[ch];
+                var currentStatus = KeyboardStatus[ch];
+
                 if (result[i] == TileStatus.Correct)
+                {
                     KeyboardStatus[ch] = TileStatus.Correct;
-                else if (result[i] == TileStatus.Present && existing != TileStatus.Correct)
+                }
+                else if (result[i] == TileStatus.Present && currentStatus != TileStatus.Correct)
+                {
                     KeyboardStatus[ch] = TileStatus.Present;
-                else if (result[i] == TileStatus.Absent && existing == TileStatus.Empty)
+                }
+                else if (result[i] == TileStatus.Absent && currentStatus == TileStatus.Empty)
+                {
                     KeyboardStatus[ch] = TileStatus.Absent;
+                }
             }
 
-            bool won = guess == State.TargetWord;
+            bool won = string.Equals(guess, State.TargetWord, StringComparison.OrdinalIgnoreCase);
+
             if (won)
             {
                 State.IsGameOver = true;
@@ -121,14 +114,42 @@ namespace LexiconWASMWordleApp.Services
             return (true, won ? State.Message : "");
         }
 
+        private (bool isValid, string error) ValidateHardMode(string currentGuess)
+        {
+            var lastRowIdx = State.Guesses.Count - 1;
+            var lastGuess = State.Guesses[lastRowIdx];
+
+            // 1. Must use correct letters in the exact same positions
+            for (int i = 0; i < 5; i++)
+            {
+                if (Board[lastRowIdx][i].Status == TileStatus.Correct && currentGuess[i] != lastGuess[i])
+                {
+                    return (false, $"Letter {lastGuess[i]} must be in position {i + 1}");
+                }
+            }
+
+            // 2. Must use present letters somewhere in the new guess
+            for (int i = 0; i < 5; i++)
+            {
+                if (Board[lastRowIdx][i].Status == TileStatus.Present && !currentGuess.Contains(lastGuess[i]))
+                {
+                    return (false, $"Guess must contain letter {lastGuess[i]}");
+                }
+            }
+
+            return (true, "");
+        }
+
         private TileStatus[] EvaluateGuess(string guess, string target)
         {
             var result = new TileStatus[5];
-            var targetChars = target.ToCharArray();
-            var guessChars = guess.ToCharArray();
+
+            // Normalize both to uppercase char arrays
+            var targetChars = target.ToUpperInvariant().ToCharArray();
+            var guessChars = guess.ToUpperInvariant().ToCharArray();
             var used = new bool[5];
 
-            // First pass: correct
+            // Pass 1: Exact matches (Green / Correct)
             for (int i = 0; i < 5; i++)
             {
                 if (guessChars[i] == targetChars[i])
@@ -138,10 +159,11 @@ namespace LexiconWASMWordleApp.Services
                 }
             }
 
-            // Second pass: present
+            // Pass 2: Misplaced letters (Yellow / Present)
             for (int i = 0; i < 5; i++)
             {
                 if (result[i] == TileStatus.Correct) continue;
+
                 bool found = false;
                 for (int j = 0; j < 5; j++)
                 {
@@ -156,6 +178,19 @@ namespace LexiconWASMWordleApp.Services
             }
 
             return result;
+        }
+
+        private void ResetBoard()
+        {
+            Board = Enumerable.Range(0, 6)
+                .Select(_ => Enumerable.Range(0, 5)
+                    .Select(_ => new TileState())
+                    .ToList())
+                .ToList();
+
+            KeyboardStatus = new Dictionary<char, TileStatus>();
+            for (char c = 'A'; c <= 'Z'; c++)
+                KeyboardStatus[c] = TileStatus.Empty;
         }
 
         private void UpdateCurrentRowTiles()

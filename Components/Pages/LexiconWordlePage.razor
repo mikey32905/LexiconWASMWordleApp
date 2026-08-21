@@ -316,8 +316,13 @@
 
         if (Game.State.IsGameOver)
         {
-            await Stats.RecordGameAsync(Game.State.IsWon, Game.State.Guesses.Count);
-            currentStats = await Stats.LoadStatsAsync();
+            await Stats.RecordGameAsync(
+             Game.State.IsWon,
+             Game.State.Guesses.Count,
+             Game.State.Mode,
+             Game.HardModeEnabled
+         );
+            currentStats = await Stats.LoadStatsAsync(); //currentStats = await Stats.LoadStatsAsync();
 
             if (Game.State.IsWon)
             {
@@ -376,9 +381,11 @@
     {
         return tile.Status switch
         {
-            TileStatus.Empty => "tile-empty",
             TileStatus.Filled => "tile-filled",
-            _ => "tile-revealed"
+            TileStatus.Correct => "tile-correct",
+            TileStatus.Present => "tile-present",
+            TileStatus.Absent => "tile-absent",
+            _ => "tile-empty"
         };
     }
 
@@ -402,6 +409,34 @@
             TileStatus.Absent => "key-absent",
             _ => "key-default"
         };
+    }
+
+    private async Task ShareResultAsync()
+    {
+        var title = Game.State.Mode == GameMode.Daily
+            ? $"LEXICON Daily {DateTime.UtcNow:yyyy-MM-dd}"
+            : "LEXICON Freeplay";
+
+        var score = Game.State.IsWon ? $"{Game.State.Guesses.Count}/6" : "X/6";
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"{title} {score}\n");
+
+        for (int r = 0; r < Game.State.Guesses.Count; r++)
+        {
+            for (int c = 0; c < 5; c++)
+            {
+                sb.Append(Game.Board[r][c].Status switch
+                {
+                    TileStatus.Correct => "🟩",
+                    TileStatus.Present => "🟨",
+                    _ => "⬛"
+                });
+            }
+            sb.AppendLine();
+        }
+
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", sb.ToString());
+        await ShowToastAsync("Copied results to clipboard!");
     }
 
     public void Dispose()

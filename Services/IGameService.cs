@@ -8,6 +8,7 @@ namespace LexiconWASMWordleApp.Services
         List<List<TileState>> Board { get; }
         Dictionary<char, TileStatus> KeyboardStatus { get; }
         GameState State { get; }
+        bool HardModeEnabled { get; set; }
 
         event Action? OnStateChanged;
 
